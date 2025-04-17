@@ -1,0 +1,571 @@
+In this notebook, we will build a Retrieval-Augmented Generation(RAG) pipeline from scratch without using any popular libraries such as Langchain or Llamaindex.
+
+RAG is a technique that retrieves related documents to the user's question, combines them with LLM-base prompt, and sends them to LLMs like GPT to produce more factually accurate generation.
+
+Lets Split RAG Pipeline into 5 parts:
+
+1. Data loading
+2. Chunking and Embedding
+3. Vector Store
+4. Retrieval & Prompt preparation
+5. Answer Generation
+
+>>>
+!pip install transformers scikit-learn docx2txt datasets nltk lancedb openai==0.28 -q
+>>>
+
+1. !: This symbol indicates that the following command should be run in the system shell, rather than within the Python interpreter. Essentially, it's like typing the command directly into your computer's terminal.
+2. pip install: This is the command used to install Python packages.
+3. transformers, scikit-learn, docx2txt, datasets, nltk, lancedb, openai: These are the names of the libraries being installed. Each of these libraries serves a different purpose in the overall functionality of the notebook. For instance:
+    transformers is likely used for tasks related to Natural Language Processing (NLP) and large language models.
+    scikit-learn is a popular machine learning library.
+    nltk is another library commonly used for text processing tasks.
+    lancedb may be used to handle a Vector database.
+4. penai==0.28: This specifies that a particular version (0.28) of the openai library should be installed.
+5. -q: This option tells pip to run in "quiet" mode, minimizing the output displayed during the installation process.
+
+NLTK stands for Natural Language Toolkit. It's a popular Python library specifically designed for working with human language data, also known as Natural Language Processing (NLP).
+Think of it as a toolbox filled with various tools to help you analyze, understand, and manipulate text.
+
+
+Set OPENAI API KEY as env variable
+# Set OPENAI_API_KEY
+>>>
+import os
+os.environ["OPENAI_API_KEY"] = "sk-..."
+>>>
+
+Setting the OpenAI API Key
+This code snippet focuses on setting up the API key required to interact with OpenAI's services, such as GPT-3, within the notebook.
+1. import os: This line imports the os module, which provides ways to interact with the operating system. This is needed to work with environment variables.
+2. os.environ["OPENAI_API_KEY"] = "sk-...": This is the crucial line where the API key is actually being set.
+    + os.environ is a dictionary-like object that represents the system's environment variables.
+    + "OPENAI_API_KEY" is the key within the os.environ dictionary where the API key will be stored.
+    + "sk-..." should be replaced with your actual OpenAI API key. This value is assigned as the value for the "OPENAI_API_KEY" environment variable.
+In summary, this code is storing your secret API key in a special operating system variable so the notebook can access OpenAI's services. This API key acts as your credential to use those services and is needed for the code in the notebook to run correctly.
+
+>>>
+# Load text
+!wget https://raw.githubusercontent.com/lancedb/vectordb-recipes/main/tutorials/RAG-from-Scratch/lease.txt
+
+# !wget link
+with open("lease.txt", "r") as file:
+    text_data = file.read()
+>>>
+
+Loading the Text Data
+This code snippet focuses on loading the text data that will be used for the Retrieval-Augmented Generation (RAG) pipeline.
+1. Downloading the Text File:
+!wget https://raw.githubusercontent.com/lancedb/vectordb-recipes/main/tutorials/RAG-from-Scratch/lease.txt
+
++ !wget: This line uses the wget command, which is a tool for downloading files from the internet.
++ https://raw.githubusercontent.com/lancedb/vectordb-recipes/main/tutorials/RAG-from-Scratch/lease.txt: This is the URL of the text file containing lease information that will be used in the RAG pipeline. The wget command downloads this file and saves it as lease.txt in the current directory.
+
+2. Reading the Text File:
+
+with open("lease.txt", "r") as file:
+    text_data = file.read()
+
++ with open("lease.txt", "r") as file:: This line opens the lease.txt file in read mode ("r") using the open function. The with statement ensures the file is automatically closed, even if errors occur.
++ text_data = file.read(): This line reads the entire content of the opened file using the read() method and stores it in a variable called text_data.
+In summary, this code downloads a text file about lease information from a GitHub repository and then reads the entire content of that file into the text_data variable for further processing in the RAG pipeline.
+
+>>>
+# Recursive Text Splitter
+
+import nltk
+
+nltk.download("punkt")
+from nltk.tokenize import sent_tokenize
+import re
+
+
+def recursive_text_splitter(text, max_chunk_length=1000, overlap=100):
+    """
+    Helper function for chunking text recursively
+    """
+    # Initialize result
+    result = []
+
+    current_chunk_count = 0
+    separator = ["\n", " "]
+    _splits = re.split(f"({separator})", text)
+    splits = [_splits[i] + _splits[i + 1] for i in range(1, len(_splits), 2)]
+
+    for i in range(len(splits)):
+        if current_chunk_count != 0:
+            chunk = "".join(
+                splits[
+                    current_chunk_count
+                    - overlap : current_chunk_count
+                    + max_chunk_length
+                ]
+            )
+        else:
+            chunk = "".join(splits[0:max_chunk_length])
+
+        if len(chunk) > 0:
+            result.append("".join(chunk))
+        current_chunk_count += max_chunk_length
+
+    return result
+>>>
+
+Recursive Text Splitter Explanation
+
+This section of code defines a function called recursive_text_splitter that is designed to break down a large piece of text into smaller, more manageable chunks. This process is often referred to as "chunking" and is a crucial step in many Natural Language Processing (NLP) tasks, including the RAG pipeline being built in this notebook.
+
+Here's a breakdown of what the code does:
+1. Import necessary libraries:
+
+import nltk
+nltk.download("punkt")
+from nltk.tokenize import sent_tokenize
+import re
+
+
++ nltk: This library (Natural Language Toolkit) provides tools for working with human language data.
++ nltk.download("punkt"): This line downloads the "punkt" dataset, which is used by NLTK for sentence tokenization (breaking text into sentences).
++ from nltk.tokenize import sent_tokenize: Imports the function used to split text into sentences.
++ re: This library provides regular expression operations, used for pattern matching in text.
+
+2. Define the function:
+
+def recursive_text_splitter(text, max_chunk_length=1000, overlap=100):
+   """
+   Helper function for chunking text recursively
+   """
+   # ... (rest of the function code) ...
+
+This defines a function named recursive_text_splitter which accepts the following arguments:
+    + text: The input text to be chunked.
+    + max_chunk_length: The maximum desired length of each chunk (default is 1000 characters).
+    + overlap: The number of characters to overlap between consecutive chunks (default is 100 characters).
+
+3. Initialize an empty list to store the chunks:
+result = []
+
+4. Split the text based on newlines and spaces:
+
+current_chunk_count = 0
+separator = ["\n", " "]
+_splits = re.split(f"({separator})", text)
+splits = [_splits[i] + _splits[i + 1] for i in range(1, len(_splits), 2)]
+
+- `current_chunk_count`: A variable to keep track of the current position in the text.
+- `separator`:  A list of characters used to split the text into initial segments.
+- `re.split()`: Splits the `text` using the `separator` patterns.
+- The code then combines the splits to include the separators in the final chunks.
+          
+5. Iterate and create chunks:
+>>>
+for i in range(len(splits)):
+    if current_chunk_count != 0:
+        chunk = "".join(
+            splits[
+                current_chunk_count
+                - overlap : current_chunk_count
+                + max_chunk_length
+            ]
+        )
+    else:
+        chunk = "".join(splits[0:max_chunk_length])
+
+    if len(chunk) > 0:
+        result.append("".join(chunk))
+    current_chunk_count += max_chunk_length
+
+return result
+>>>
+- This loop iterates through the initial splits and creates the final chunks.
+- It handles the first chunk differently to avoid negative indexing.
+- **Overlap:** If it's not the first chunk, it includes an overlap with the previous chunk.
+- It appends each chunk to the `result` list.
+- It updates `current_chunk_count` to move to the next section of the text.
+
+6. Return the chunks:
+
+The function finally returns the result list, which now contains the chunked text.
+In summary, recursive_text_splitter takes a large text, splits it into smaller chunks with a specified maximum length and overlap, and returns these chunks in a list. This prepares the text for further processing in the RAG pipeline, such as embedding and storing in a vector database.
+
+>>>
+# Split the text using the recursive character text splitter
+chunks = recursive_text_splitter(text_data, max_chunk_length=100, overlap=10)
+print("Number of Chunks: ", len(chunks))
+>>>
+
+Splitting the Text into Chunks
+
+This section of the code is responsible for splitting the large text document into smaller, more manageable pieces called "chunks". This is a common practice in Natural Language Processing (NLP) to make the text easier to work with for computers.
+
+The Code:
+# Split the text using the recursive character text splitter
+>>>
+chunks = recursive_text_splitter(text_data, max_chunk_length=100, overlap=10)
+print("Number of Chunks: ", len(chunks))
+>>>
+Explanation:
+1. chunks = recursive_text_splitter(text_data, max_chunk_length=100, overlap=10):
+    + This line calls the recursive_text_splitter`` function to split the text stored in thetext_data` variable.
+    + It's given two important parameters:
+        - max_chunk_length=100 : This specifies that each chunk should be approximately 100 characters long.
+        - overlap=10 : This means that consecutive chunks will have about 10 characters in common. This overlap helps to ensure that important information isn't lost when splitting the text.
+2. print("Number of Chunks: ", len(chunks)):
+    + This line simply prints out the total number of chunks created after the text is split. The len() function is used to count the number of chunks in the chunks variable.
+In Summary:
+This code takes a large text document, breaks it down into smaller chunks of about 100 characters each with a slight overlap between chunks, and then tells you how many chunks were created. This process of chunking is crucial for the next steps in the RAG pipeline, like embedding the chunks and storing them in a vector database.
+
+Embedder
+>>>
+from transformers import AutoTokenizer, AutoModel
+import torch
+
+# Choose a pre-trained model (e.g., BERT, RoBERTa, etc.)
+# Load the tokenizer and model
+model_name = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+
+
+def embedder(chunk):
+    """
+    Helper function to embed chunk of text
+    """
+    # Tokenize the input text
+    tokens = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True)
+
+    # Get the model's output (including embeddings)
+    with torch.no_grad():
+        model_output = model(**tokens)
+
+    # Extract the embeddings
+    embeddings = model_output.last_hidden_state[:, 0, :]
+    embed = embeddings[0].numpy()
+    return embed
+>>>
+Embedding with Transformers
+This part of the code is responsible for converting the text chunks into numerical representations called embeddings. Embeddings are essential for the RAG pipeline because they allow the system to understand the meaning and relationships between words and sentences in a mathematical way.
+
+Imports and Model Loading
+>>>
+from transformers import AutoTokenizer, AutoModel
+import torch
+# Choose a pre-trained model (e.g., BERT, RoBERTa, etc.)
+# Load the tokenizer and model
+model_name = "bert-base-uncased"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+>>>
+
+1. from transformers import AutoTokenizer, AutoModel: This line imports the necessary tools from the transformers library.
+    + AutoTokenizer is used to convert text into tokens (smaller units like words or subwords) that the model can understand.
+    + AutoModel is used to load the pre-trained language model itself.
+2. import torch: This line imports the torch library, which is a powerful framework for deep learning and is used by the transformers library.
+3. model_name = "bert-base-uncased": This line specifies the name of the pre-trained model to use. In this case, it's "bert-base-uncased," which is a popular and versatile language model.
+4. tokenizer = AutoTokenizer.from_pretrained(model_name): This line loads the tokenizer associated with the chosen model.
+5. model = AutoModel.from_pretrained(model_name): This line loads the pre-trained model itself.
+
+The embedder Function
+>>>
+def embedder(chunk):
+    """
+    Helper function to embed chunk of text
+    """
+    # Tokenize the input text
+    tokens = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True)
+
+    # Get the model's output (including embeddings)
+    with torch.no_grad():
+        model_output = model(**tokens)
+
+    # Extract the embeddings
+    embeddings = model_output.last_hidden_state[:, 0, :]
+    embed = embeddings[0].numpy()
+    return embed
+>>>
+
+1. def embedder(chunk):: This defines a function called embedder that takes a text chunk as input.
+2. tokens = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True): This line uses the tokenizer to convert the input chunk into tokens.
+    + return_tensors="pt" specifies that the tokens should be returned as PyTorch tensors.
+    + padding=True ensures that all chunks are padded to the same length, which is necessary for efficient processing.
+    + truncation=True truncates chunks that are longer than the model's maximum input length.
+3. with torch.no_grad():: This line disables gradient calculations, which is important for inference (using the model for prediction) as it saves memory and speeds up the process.
+4. `model_output = model(tokens)**: This line feeds thetokensto the pre-trainedmodel` and gets its output.
+5. embeddings = model_output.last_hidden_state[:, 0, :]: This line extracts the embeddings from the model_output. It takes the last hidden state of the model (which contains rich contextual information) and selects the embedding for the first token ([CLS] token in BERT), which is often used as a representation of the entire input sequence.
+6. embed = embeddings[0].numpy(): This line converts the embedding tensor into a NumPy array for easier handling.
+7. return embed: This line returns the final embedding for the input chunk.
+In summary, this code snippet uses a pre-trained language model (BERT) to transform text chunks into numerical embeddings. These embeddings capture the semantic meaning of the text and are used in the later stages of the RAG pipeline for retrieval and answer generation.
+
+
+>>>
+# Embed all the chunks of text
+embeds = []
+for chunk in chunks:
+    embed = embedder(chunk)
+    embeds.append(embed)
+>>>
+This section focuses on converting the text chunks into numerical representations called embeddings. This is a crucial step because machine learning models work with numbers, not raw text.
+
+1. embeds = []: This line initializes an empty list called embeds. This list will store the numerical representations (embeddings) of all our text chunks.
+2. for chunk in chunks:: This line starts a loop that iterates through each chunk of text in the chunks list we created earlier.
+3. embed = embedder(chunk): Inside the loop, this line calls the embedder function (defined earlier in the code) with the current chunk as input. The embedder function processes the text and returns its numerical representation as an embedding. This embedding is assigned to the variable embed.
+4. embeds.append(embed): This line adds the newly created embed (the numerical representation of the current chunk) to the embeds list.
+
+In simpler terms:
+Imagine you have a box of puzzle pieces (chunks). This code takes each puzzle piece (chunk), uses a special machine (embedder function) to create a mold of the piece (embed), and then stores all the molds (embeds) in a separate container. These molds, in this case, are the numerical embeddings that represent the essence of each text chunk. This makes it possible for the machine learning model to understand and work with the text data later on.
+
+
+>>>
+# Insert text chunks with their embeddings
+
+import lancedb
+
+
+def prepare_data(chunks, embeddings):
+    """
+    Helper function to prepare data to insert in LanceDB
+    """
+    data = []
+    for chunk, embed in zip(chunks, embeddings):
+        temp = {}
+        temp["text"] = chunk
+        temp["vector"] = embed
+        data.append(temp)
+    return data
+
+
+def lanceDBConnection(chunks, embeddings):
+    """
+    LanceDB insertion
+    """
+    db = lancedb.connect("/tmp/lancedb")
+    data = prepare_data(chunks, embeddings)
+    table = db.create_table(
+        "scratch",
+        data=data,
+        mode="overwrite",
+    )
+    return table
+
+
+table = lanceDBConnection(chunks, embeds)
+>>>
+Vector Store Creation with LanceDB
+This section of code focuses on storing the text chunks and their corresponding embeddings in a vector database using LanceDB. A vector database is a specialized database designed to efficiently store and search through high-dimensional vectors, like the embeddings generated in the previous step.
+
+Importing LanceDB
+>>>
+import lancedb
+>>>
+    + This line imports the lancedb library, enabling the use of LanceDB functionality for creating and interacting with the vector database.
+
+Preparing Data for Insertion
+>>>
+def prepare_data(chunks, embeddings):
+    """
+    Helper function to prepare data to insert in LanceDB
+    """
+    data = []
+    for chunk, embed in zip(chunks, embeddings):
+        temp = {}
+        temp["text"] = chunk
+        temp["vector"] = embed
+        data.append(temp)
+    return data
+>>>
+
++ This function, prepare_data, takes the chunks (text pieces) and their embeddings as input.
++ It iterates through each chunk and embed pair using zip, creating a dictionary temp to store them.
++ temp["text"] stores the chunk itself.
++ temp["vector"] stores the embed (numerical representation) of the chunk.
++ Each temp dictionary is appended to a list called data.
++ Finally, the data list, containing all the chunks and embeddings, is returned.
+
+Connecting to LanceDB and Creating Table
+>>>
+def lanceDBConnection(chunks, embeddings):
+    """
+    LanceDB insertion
+    """
+    db = lancedb.connect("/tmp/lancedb")
+    data = prepare_data(chunks, embeddings)
+    table = db.create_table(
+        "scratch",
+        data=data,
+        mode="overwrite",
+    )
+    return table
+>>>
++ This function, lanceDBConnection, handles the connection to LanceDB and table creation.
++ It connects to a LanceDB database located at /tmp/lancedb using lancedb.connect.
++ It calls prepare_data to structure the chunks and embeddings for insertion.
++ Using db.create_table, it creates a table named "scratch" in the database.
+      - data=data: populates the table with the prepared data.
+      - mode="overwrite": if a table with the same name exists, it is overwritten with the new data.
++ The newly created table is then returned.
+
+Creating the Table
+>>>
+table = lanceDBConnection(chunks, embeds)
+>>>
++ This line calls lanceDBConnection, passing the chunks and their corresponding embeds that were generated earlier.
++ The resulting LanceDB table is assigned to the variable table, allowing further interaction with it.
+
+
+>>>
+# Retriever
+k = 5
+question = "What is issue date of lease?"
+
+# Embed Question
+query_embedding = embedder(question)
+# Semantic Search
+result = table.search(query_embedding).limit(5).to_list()
+>>>
+
+Retriever and Prompt Preparation
+This section of the code focuses on retrieving relevant information from the vector store based on a user's question.
+>>>          
+Retriever
+# Retriever
+k = 5
+question = "What is issue date of lease?"
+>>>
+1. k = 5: This line sets the variable k to 5. This variable determines the number of top results to retrieve from the vector store. In this case, it will retrieve the 5 most similar chunks to the question.
+2. question = "What is issue date of lease?": This line sets the variable question to the user's input, which is "What is the issue date of the lease?". This is the query we want to find relevant information for.
+
+Embedding the Question
+# Embed Question
+>>>
+query_embedding = embedder(question)
+>>>
+1. query_embedding = embedder(question): This line utilizes the embedder function (defined earlier) to generate an embedding for the question. This embedding is a numerical representation of the question's meaning, allowing for semantic similarity comparisons.
+
+Semantic Search
+>>>        
+# Semantic Search
+result = table.search(query_embedding).limit(5).to_list()
+>>>
+1. result = table.search(query_embedding).limit(5).to_list(): This line performs the semantic search using the LanceDB table (table).
+    + It searches the table for entries that have vectors (embeddings) most similar to the query_embedding.
+    + .limit(5) restricts the search to retrieve only the top 5 most similar results, as specified by the k value.
+    + .to_list() converts the search results into a Python list, storing them in the result variable.
+In essence, this code snippet takes a user's question, transforms it into an embedding, and then uses that embedding to retrieve the most semantically similar chunks of text from the LanceDB vector database. This retrieved information can then be used to prepare a prompt for an LLM to generate a more informed and accurate answer.
+
+>>>
+context = [r["text"] for r in result]
+context
+>>>
+
+Line 1: Building the context
+context = [r["text"] for r in result]
+
+This line uses a list comprehension which is a compact way to create lists in Python. Let's dissect it:
+
+1. result: This variable (from the previous line) holds the top k (in this case, 5) most similar text chunks retrieved from the LanceDB database based on the semantic similarity to the question. It is essentially a list of dictionary-like objects.
+2. r: In the list comprehension, r represents each individual item (a dictionary-like object) within the result list as it iterates through it.
+3. r["text"]: This part accesses the value associated with the key "text" within each r item. This value is the actual text content of the retrieved chunk.
+4. [ ... ]: The square brackets indicate we are constructing a new list.
+5. Putting it together: This entire line iterates through each retrieved chunk in the result list and extracts the text content (r["text"]), creating a new list called context. This context list will now contain the raw text of the most relevant chunks related to the user's question.
+
+Line 2: Displaying the context
+context
+
+This line simply displays the contents of the context list in the Jupyter Notebook output. By placing the variable name context on its own line, Jupyter understands to display its value. This allows you to see the text chunks that were retrieved and will be used to formulate the answer to the user's question.
+
+
+>>>
+# Context Prompt
+
+base_prompt = """You are an AI assistant. Your task is to understand the user question, and provide an answer using the provided contexts. Every answer you generate should have citations in this pattern  "Answer [position].", for example: "Earth is round [1][2].," if it's relevant.
+
+Your answers are correct, high-quality, and written by an domain expert. If the provided context does not contain the answer, simply state, "The provided context does not have the answer."
+
+User question: {}
+
+Contexts:
+{}
+"""
+
+Retriever & Prompt Preparation: Context Prompt
+          
+This section of the code defines a base prompt that will be used to instruct a large language model (LLM). This prompt is crucial for Retrieval-Augmented Generation (RAG) because it provides the LLM with the necessary information to answer a user's question accurately.
+>>>
+# Context Prompt
+base_prompt = """You are an AI assistant. Your task is to understand the user question, and provide an answer using the provided contexts. Every answer you generate should have citations in this pattern  "Answer [position].", for example: "Earth is round [1][2].," if it's relevant.
+Your answers are correct, high-quality, and written by an domain expert. If the provided context does not contain the answer, simply state, "The provided context does not have the answer."
+User question: {}
+Contexts:
+{}
+"""
+Use code with caution
+
+Here's a breakdown:
+1. Instructions for the AI: The prompt begins by telling the AI its role: "You are an AI assistant. Your task is to understand the user question, and provide an answer using the provided contexts."
+2. Citation Format: It then specifies how the AI should cite its sources: "Every answer you generate should have citations in this pattern "Answer [position].", for example: "Earth is round [1][2].," if it's relevant." This ensures that the AI's responses are traceable to the specific context provided.
+3. Quality and Expertise: The prompt emphasizes the desired quality of the responses: "Your answers are correct, high-quality, and written by an domain expert." This guides the AI to generate responses that are both accurate and well-written.
+4. Handling Insufficient Context: It also instructs the AI on what to do if the context doesn't contain the answer: "If the provided context does not contain the answer, simply state, "The provided context does not have the answer."" This ensures that the AI provides a clear response even when it cannot answer the question based on the given context.
+5. Placeholders for Input: The prompt includes two placeholders represented by curly braces {}:
+    + The first {} is where the user's question will be inserted.
+    + The second {} is where the retrieved contexts will be inserted. These contexts are selected based on their relevance to the user's question.
+In essence, this base_prompt acts as a template that is filled with the specific question and relevant information before being sent to the LLM. This process ensures that the LLM has the necessary instructions and data to generate a comprehensive and accurate response.
+
+
+Answer Generation
+>>>
+import openai
+
+# llm
+prompt = f"{base_prompt.format(question, context)}"
+response = openai.ChatCompletion.create(
+    model="gpt-4o",
+    temperature=0,
+    messages=[
+        {"role": "system", "content": prompt},
+    ],
+)
+
+print(response.choices[0].message.content)
+>>>
+
+Answer Generation using OpenAI
+This part of the code is where the system actually generates an answer to the user's question using the OpenAI API. It takes the prompt (which includes the question and the relevant context) and sends it to the GPT model for processing.
+
+Code Explanation:
+>>>
+import openai
+>>>
++ import openai: This line imports the openai library, which allows the code to interact with OpenAI's language models.
+>>>
+# llm
+prompt = f"{base_prompt.format(question, context)}"
+>>>
++ prompt = f"{base_prompt.format(question, context)}": This line creates the final prompt that will be sent to the OpenAI model.
+    - It uses an f-string (formatted string literal) to insert the question and context into the base_prompt template.
+    - Remember, the base_prompt is a pre-defined string that instructs the AI on how to behave and what format to use for answers.
+    - The .format() method replaces the placeholders in the base_prompt with the actual question and context.
+>>>
+response = openai.ChatCompletion.create(
+    model="gpt-4o",
+    temperature=0,
+    messages=[
+        {"role": "system", "content": prompt},
+    ],
+)
+>>>
+
++ response = openai.ChatCompletion.create(...): This is the core of the answer generation process.
+    - It calls the openai.ChatCompletion.create() function, which sends the prompt to the specified OpenAI model.
+    - model="gpt-4o": This specifies that the GPT-4 language model ("gpt-4o" variant) should be used.
+    - temperature=0: The temperature setting controls the randomness of the model's output. A value of 0 makes the output very deterministic (it will likely give the same answer every time for the same prompt).
+    - messages=[{"role": "system", "content": prompt}]: This is how the prompt is passed to the model. It's packaged as a message with the role "system," indicating that it's an instruction for the model.
+>>>
+print(response.choices[0].message.content)
+>>>
+
++ print(response.choices[0].message.content): This line prints the AI's answer.
+    -  The response object contains the model's output.
+    -  choices[0] selects the top-ranked answer from the model (since it might generate multiple options).
+    -  message.content extracts the actual text content of the answer.
+    -  print() displays the answer on the console or in the output of the Jupyter Notebook cell.
+In summary, this section of code sends a carefully crafted prompt to an OpenAI language model, gets the AI's response, and then prints the AI-generated answer for the user to see.

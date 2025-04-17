@@ -5,3 +5,309 @@ The memory allows a "agent" to remember previous interactions with the user. By 
 There are many applications where remembering previous interactions is very important, such as chatbots. Conversational memory allows us to do that.
 In this notebook we'll explore this form of memory in the context of the LangChain library.
 We'll start by importing all of the libraries that we'll be using in this example.
+
+>>>
+!pip install -qU langchain openai tiktoken
+>>>
+
+!: This symbol allows you to run shell commands within the Jupyter notebook environment. In this case, it's running the pip command.
+pip: This is the package installer for Python. It's used to install, upgrade, and manage Python packages.
+install: This is the command telling pip to install the following packages.
+-qU: These are flags for pip.
+    -q (or --quiet) makes the installation quieter by reducing the output it displays.
+    -U (or --upgrade) forces pip to upgrade any packages that are already installed to the latest versions.
+langchain openai tiktoken: These are the names of the libraries being installed. They are essential for working with large language models:
+    langchain: This is a framework for developing applications powered by language models. It provides tools for building chains, agents and memory modules.
+    openai: This library allows you to connect to and interact with OpenAI's language models such as GPT-3.
+    tiktoken: This library provides a way to count the number of tokens used by OpenAI models, which is important for billing and usage monitoring.
+
+>>>
+import inspect
+
+from getpass import getpass
+from langchain import OpenAI
+from langchain.chains import LLMChain, ConversationChain
+from langchain.chains.conversation.memory import (ConversationBufferMemory, 
+                                                  ConversationSummaryMemory, 
+                                                  ConversationBufferWindowMemory,
+                                                  ConversationKGMemory)
+from langchain.callbacks import get_openai_callback
+import tiktoken
+>>>
+
+1. import inspect: This line imports the inspect module, which is a built-in Python tool for understanding the internals of objects like classes and functions. In this case, it's likely used to examine the structure of the LangChain components.
+2. from getpass import getpass: This imports the getpass function, which is used to securely get the user's OpenAI API key without displaying it on the screen. This is important for keeping your API key secret.
+3. from langchain import OpenAI: This imports the OpenAI class from the langchain library. langchain is a framework for building applications with large language models (LLMs), and the OpenAI class is specifically for interacting with OpenAI's models like GPT-3.
+4. from langchain.chains import LLMChain, ConversationChain: This imports two important classes:
+    LLMChain: A basic building block in LangChain that links an LLM with other components to form a chain of operations.
+    ConversationChain: A specific type of chain designed for handling conversations, remembering previous interactions, and providing context to the LLM.
+5. from langchain.chains.conversation.memory import (ConversationBufferMemory, ConversationSummaryMemory, ConversationBufferWindowMemory, ConversationKGMemory): This line imports different types of memory modules that can be used with the ConversationChain:
+    ConversationBufferMemory: Stores the entire conversation history.
+    ConversationSummaryMemory: Summarizes the conversation history to keep it concise.
+    ConversationBufferWindowMemory: Remembers only the most recent parts of the conversation.
+    ConversationKGMemory: Stores the conversation history as a knowledge graph, extracting entities and relationships.
+6. from langchain.callbacks import get_openai_callback: This imports a function used to monitor the usage of OpenAI's API, including the number of tokens used during calls.
+7. import tiktoken: This line imports the tiktoken library, used by OpenAI to count the number of tokens in text. Tokens are the basic units that LLMs process, and understanding token usage is important for managing costs and staying within API limits.
+
+>>>
+OPENAI_API_KEY = getpass()
+>>>
+
+This line is crucial for using OpenAI's language models. Here's what's happening:
+OPENAI_API_KEY: This is a variable that will store your secret OpenAI API key. Think of it like a password that gives you access to OpenAI's powerful language processing capabilities.
+getpass(): This is a function that securely prompts the user to enter a password or sensitive information without displaying it on the screen. It's like when you type in your password at an ATM and the characters are hidden.
+In simpler terms:
+    This line of code is asking you, the user, to enter your OpenAI API key in a secure way. The key is then stored in the OPENAI_API_KEY variable, which the rest of the code will use to interact with OpenAI's        services. This keeps your API key protected from being accidentally displayed or stored in plain text within the code.
+
+
+>>>
+llm = OpenAI(
+    temperature=0, 
+    openai_api_key=OPENAI_API_KEY,
+    model_name='text-davinci-003'  # can be used with llms like 'gpt-3.5-turbo'
+)
+>>>
+
+1. llm = OpenAI(...): This line creates a variable called llm and assigns it an instance of the OpenAI class. This instance represents the language model we'll be using.
+2. temperature=0: This parameter controls the randomness of the model's output. A temperature of 0 makes the model's responses very deterministic and predictable.
+3. openai_api_key=OPENAI_API_KEY: This is where you provide your OpenAI API key, which is necessary to access and use their models. OPENAI_API_KEY is likely defined earlier in the code, possibly obtained from the user.
+4. model_name='text-davinci-003': This specifies the specific OpenAI model to use. In this case, it's 'text-davinci-003', a powerful language model. The comment indicates that other models like 'gpt-3.5-turbo' could also be used here.
+In simpler terms:
+Imagine you're building a chatbot. This code is like choosing the "brain" for your chatbot. It selects a specific language model from OpenAI, provides it with the necessary credentials (openai_api_key), and configures how creative or predictable its responses should be (temperature). This sets the stage for the chatbot to understand and respond to user inputs effectively.
+
+>>>
+def count_tokens(chain, query):
+    with get_openai_callback() as cb:
+        result = chain.run(query)
+        print(f'Spent a total of {cb.total_tokens} tokens')
+
+    return result
+>>>
+
+Here's a step-by-step explanation:
+1. def count_tokens(chain, query):: This line defines the function named count_tokens that accepts two arguments:
+    chain: This represents a LangChain chain object, which is a sequence of operations used to process text.
+    query: This is the input text that will be processed by the chain.
+    
+2. with get_openai_callback() as cb:: This line uses a with statement and the get_openai_callback function.
+    get_openai_callback(): This function is from LangChain and is designed to track the usage of tokens when interacting with OpenAI's language models.
+    as cb: This assigns the callback object to the variable cb, allowing access to its properties.
+    with statement: The code within is executed while monitoring token usage using the callback.
+
+3. result = chain.run(query): This line is where the actual work happens.
+    chain.run(query): This executes the LangChain chain with the provided query (the user's input). The output or result of the chain's processing is then stored in the result variable.
+
+4. print(f'Spent a total of {cb.total_tokens} tokens'): This line is responsible for displaying the token usage information.
+    print(): The Python function used for printing output to the console.
+    f'Spent a total of {cb.total_tokens} tokens' : This is formatted to output the total tokens consumed during the chain's execution by accessing cb.total_tokens from the callback object cb.
+
+5. return result: Finally, the function returns the result that was generated by the LangChain chain.
+
+In summary, the count_tokens function helps in understanding the cost (in terms of tokens) of running LangChain operations. It executes the specified chain, measures the tokens used by the chain operation, and reports to the user, making it an essential component in managing and optimizing language model interactions.
+
+What is memory?
+Definition: Memory is an agent's capacity of remembering previous interactions with the user (think chatbots)
+
+The official definition of memory is the following:
+
+By default, Chains and Agents are stateless, meaning that they treat each incoming query independently. In some applications (chatbots being a GREAT example) it is highly important to remember previous interactions, both at a short term but also at a long term level. The concept of “Memory” exists to do exactly that.
+
+As we will see, although this sounds really straightforward there are several different ways to implement this memory capability.
+
+Before we delve into the different memory modules that the library offers, we will introduce the chain we will be using for these examples: the ConversationChain.
+
+As always, when understanding a chain it is interesting to peek into its prompt first and then take a look at its ._call method. As we saw in the chapter on chains, we can check out the prompt by accessing the template within the prompt attribute.
+
+>>>
+conversation = ConversationChain(
+    llm=llm, 
+)
+>>>
+Initializing a Conversation Chain
+This code snippet is initializing a ConversationChain object from the LangChain library. This object is designed to manage conversations with a large language model (LLM), allowing it to remember previous interactions.
+
++ conversation: This is a variable that will store the ConversationChain object. Think of it as a label you assign to the conversation manager.
++ ConversationChain: This is the class or blueprint for creating a conversation management object. It's provided by the LangChain library.
++ llm=llm: This argument specifies the large language model (LLM) that will be used to power the conversation. The llm variable is assumed to have been defined earlier in your code and refers to an initialized LLM object (likely from the langchain.llms module). It's passed as an argument so the ConversationChain knows which LLM to use for generating responses.
+
+In essence, this line of code is setting up a system for interactive conversations, where an LLM will respond based on the current user input and the history of the conversation. The ConversationChain acts like a manager that handles this interaction.
+
+>>>
+print(conversation.prompt.template)
+>>>
+OUTPUT (
+The following is a friendly conversation between a human and an AI. The AI is talkative and provides lots of specific details from its context. If the AI does not know the answer to a question, it truthfully says it does not know.
+
+Current conversation:
+{history}
+Human: {input}
+AI: )
+
+Understanding the Context
+The code you provided is part of a larger Jupyter Notebook that demonstrates how to use conversational memory in LangChain. This is essentially how we give chatbots the ability to remember past interactions, making them more conversational.
+
+The line conversation = ConversationChain(llm=llm) creates a ConversationChain object named conversation. This object is designed to handle conversations using the specified language model (llm).
+
+What does print(conversation.prompt.template) do?
+This specific line of code is designed to display the underlying template that the ConversationChain uses to structure the conversation. Let's break down each part:
+
+1. conversation: This is the ConversationChain object we created earlier.
+2. .prompt: This attribute of the ConversationChain stores the prompt template used for interactions.
+3. .template: This attribute of the prompt object contains the actual template string.
+4. print(): This is a built-in Python function used to display information to the user. In this case, it will display the content of the template.
+In simpler terms, this line of code shows you the blueprint that the ConversationChain uses to format the conversation history and user input before sending it to the language model. It helps us understand how memory is integrated into the chain's operation.
+
+
+Interesting! So this chain's prompt is telling it to chat with the user and try to give truthful answers. If we look closely, there is a new component in the prompt that we didn't see when we were tinkering with the LLMMathChain: history. This is where our memory will come into play.
+
+What is this chain doing with this prompt? Let's take a look.
+
+>>>
+print(inspect.getsource(conversation._call), inspect.getsource(conversation.apply))
+>>>
+OUTPUT (
+    def _call(self, inputs: Dict[str, Any]) -> Dict[str, str]:
+        known_values = self.prep_inputs(inputs.copy())
+        return self.apply([known_values])[0]
+     def apply(self, input_list: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Utilize the LLM generate method for speed gains."""
+        response = self.generate(input_list)
+        return self.create_outputs(response)
+)
+
+This code snippet is used to understand the inner workings of the ConversationChain object, specifically how it processes and responds to user inputs.
+
++ inspect: This is a built-in Python module used for introspection, which basically means examining the internals of objects and code.
++ getsource: This function from the inspect module retrieves the source code of a given object. In this case, it's used to get the code of the _call and apply methods of the conversation object.
++ conversation: This is an instance of the ConversationChain class, designed to manage conversational interactions with a language model.
++ _call: In Python, _call is a special method that allows an object to be called like a function. For the ConversationChain, this method is responsible for processing the user's input and generating a response, taking into account the conversation history.
++ apply: This method, inherited from the parent LLMChain, likely handles the application of the language model to the input and context. It might take care of formatting the prompt, sending it to the language model, and receiving the generated response.
++ print: This function simply displays the retrieved source code of the _call and apply methods to the console.
+
+In essence, this line of code is trying to show us the underlying logic of how the ConversationChain manages the conversation flow and uses the language model to generate responses. By printing the source code of these key methods, the user aims to gain a deeper understanding of the chain's internal mechanisms.
+
+Nothing really magical going on here, just a straightforward pass through an LLM. In fact, this chain inherits these methods directly from the LLMChain without any modification:
+>>>
+print(inspect.getsource(LLMChain._call), inspect.getsource(LLMChain.apply))
+>>>
+OUTPUT (
+    def _call(self, inputs: Dict[str, Any]) -> Dict[str, str]:
+        known_values = self.prep_inputs(inputs.copy())
+        return self.apply([known_values])[0]
+     def apply(self, input_list: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Utilize the LLM generate method for speed gains."""
+        response = self.generate(input_list)
+        return self.create_outputs(response)
+)
+
+This code snippet is using the inspect module in Python to display the source code of two methods of the LLMChain class: _call and apply.
+1. inspect.getsource(LLMChain._call): This part is using the getsource function from the inspect module to retrieve the source code of the _call method which is internally used by the LLMChain class. The _call method is typically invoked when you call an instance of the class directly.
+2. inspect.getsource(LLMChain.apply): Similarly, this is getting the source code of the apply method of the LLMChain class. The apply method is another way to execute the chain's logic.
+3. print(...): Finally, the entire output from both inspect.getsource calls is being printed to the console using the print function.
+
+In essence, this line of code is meant to show you the underlying implementation of how the LLMChain processes and handles its inputs. By examining the source code of the _call and apply methods, you can gain a deeper understanding of how this core component of LangChain functions.
+
+So basically this chain combines an input from the user with the conversation history to generate a meaningful (and hopefully truthful) response.
+
+Now that we've understood the basics of the chain we'll be using, we can get into memory. Let's dive in!
+
+Memory types
+In this section we will review several memory types and analyze the pros and cons of each one, so you can choose the best one for your use case.
+
+Memory type #1: ConversationBufferMemory
+The ConversationBufferMemory does just what its name suggests: it keeps a buffer of the previous conversation excerpts as part of the context in the prompt.
+
+Key feature: the conversation buffer memory keeps the previous pieces of conversation completely unmodified, in their raw form.
+>>>
+conversation_buf = ConversationChain(
+    llm=llm,
+    memory=ConversationBufferMemory()
+)
+>>>
+This code is creating a chatbot that remembers previous interactions using LangChain's ConversationChain and ConversationBufferMemory.
+1. conversation_buf = ...: This line creates a new variable named conversation_buf. This variable will store an instance of the ConversationChain, essentially our chatbot.
+2. ConversationChain(...): This is the core component, creating the chatbot itself using the ConversationChain class.
+3. llm=llm: This argument tells the ConversationChain which large language model (LLM) to use for generating responses. The llm here refers to a previously defined language model, likely from OpenAI (as indicated in earlier parts of the code you provided). This LLM is the brains of the operation, understanding and responding to user input.
+4. memory=ConversationBufferMemory(): This is where the memory comes in. ConversationBufferMemory() creates a type of memory that stores the entire history of the conversation as a simple buffer (a chronological record). This memory is then passed to the ConversationChain so the chatbot can remember past interactions when responding to new messages.
+In simpler terms:
+Imagine a notepad where you write down every message you and the chatbot exchange. This notepad is like ConversationBufferMemory. Every time you ask the chatbot something, it looks back at the entire notepad (the conversation history) to understand the context and give a more relevant response. The ConversationChain is the chatbot itself, using the notepad and the LLM to talk to you.
+
+We pass a user prompt the the ConversationBufferMemory like so:
+>>>
+conversation_buf("Good morning AI!")
+>>>
+OUTPUT (
+{'input': 'Good morning AI!',
+ 'history': '',
+ 'response': " Good morning! It's a beautiful day today, isn't it? How can I help you?"}
+)
+
+Okay, let's break this line of code down:
+This code snippet is interacting with a chatbot that has memory.
+1. conversation_buf: This is a variable that represents our chatbot. Think of it like a name we've given to our specific chatbot instance. This chatbot has been set up with a ConversationBufferMemory, which means it remembers past interactions.
+2. "Good morning AI!": This is a string, it is the message we're sending to the chatbot. Think of it as what you would type into a chat window to start a conversation.
+3. conversation_buf("Good morning AI!"): This line is where the action happens. We're calling our chatbot (conversation_buf) and passing it our message ("Good morning AI!"). This sends the message to the chatbot, and the chatbot will process it using its memory of previous interactions (which are empty in this case as it is the first interaction) to generate a response.
+In simpler terms:
+Imagine you are talking to a chatbot. You would type in your message, and the chatbot would respond. conversation_buf("Good morning AI!") is like typing "Good morning AI!" to this specific chatbot. Since the chatbot has a memory it will store this message to be used in later interactions.
+
+This one call used a total of `85` tokens, but we can't see that from the above. If we'd like to count the number of tokens being used we just pass our conversation chain object and the message we'd like to input via the `count_tokens` function we defined earlier:
+
+>>>
+count_tokens(
+    conversation_buf, 
+    "My interest here is to explore the potential of integrating Large Language Models with external knowledge"
+)
+>>>
+
+Explanation of the Code Snippet
+This code snippet is using a function called count_tokens to determine how many tokens are used by a Language Model (LLM) when processing a specific input. This is important for understanding and managing the cost and efficiency of using LLMs.
+
+Components of the Code
+1. count_tokens: This is a custom function defined earlier in the notebook to track token usage by the LLM. It likely uses the OpenAI API's callback feature to get this information.
+
+def count_tokens(chain, query):
+       with get_openai_callback() as cb:
+           result = chain.run(query)
+           print(f'Spent a total of {cb.total_tokens} tokens')
+
+       return result
+
+2. conversation_buf: This is a variable representing a specific instance of a ConversationChain. This chain is designed to handle conversations and has memory to remember previous interactions. In this case, it's using ConversationBufferMemory, which stores the entire conversation history.
+
+conversation_buf = ConversationChain(
+       llm=llm,
+       memory=ConversationBufferMemory()
+   )
+
++
+"My interest here is to explore the potential of integrating Large Language Models with external knowledge": This is the input string (or query) being sent to the LLM. It represents the user's message in the conversation.
+How it Works
+The count_tokens function is called with conversation_buf and the user's input string.
+Inside count_tokens, the input string is passed to the conversation_buf chain's run method, which sends it to the LLM for processing.
+The OpenAI callback mechanism captures the total number of tokens used during this process.
+The function then prints this token count to the console, providing information about resource usage.
+Finally, the count_tokens function returns the result of the LLM's processing (which might be a response to the user's input, but this code snippet is focusing on the token counting aspect).
+In essence, this code snippet simulates a user sending a message to a conversational AI and measures the cost of processing that message in terms of tokens. This information is valuable for understanding how the LLM is being used and potentially optimizing its performance.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
